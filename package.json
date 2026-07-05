@@ -17,6 +17,9 @@
   "author": "",
   "license": "ISC",
   "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "@mendable/firecrawl-js": "^4.29.2",
     "@supabase/supabase-js": "^2.110.0",
