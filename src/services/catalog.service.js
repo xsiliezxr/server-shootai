@@ -16,7 +16,6 @@ const {
   inferGenderFromText,
   canonicalizeStyles,
   matchesGenderStrict,
-  matchesGenderFilter,
 } = require('../utils/styleTaxonomy');
 
 const normalizeGarment = (g, empresaId) => {
@@ -254,17 +253,14 @@ const matchGarmentsForEmpresa = async ({
   let top = scored.slice(0, fetchLimit);
 
   if (top.length === 0) {
-    const relaxed = catalog
-      .filter((g) => matchesGenderFilter(g.gender, gender))
+    top = catalog
+      .filter((g) => matchesGenderStrict(g.gender, gender, g.type))
       .map((g) => {
         const { score, matchedStyles } = scoreGarmentsByStyle(g, briefStyles);
         return { garment: g, score, matchedStyles };
       })
-      .filter(({ score }) => score >= 0)
       .sort((a, b) => b.score - a.score)
       .slice(0, fetchLimit);
-
-    top = relaxed;
   }
 
   return top.map(({ garment, score, matchedStyles }) =>

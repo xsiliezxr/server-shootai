@@ -61,11 +61,11 @@ const deleteFavorite = async (req, res) => {
 };
 
 const suggestOccasion = async (req, res) => {
-  const occasion = await favoritesService.suggestOccasionForOutfit(req.body);
+  const suggestions = await favoritesService.suggestOccasionForOutfit(req.body);
 
   res.status(200).json({
     success: true,
-    data: { occasion },
+    data: suggestions,
   });
 };
 

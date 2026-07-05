@@ -11,7 +11,6 @@ const {
   canonicalizeStyles,
   resolveTargetGender,
   matchesGenderStrict,
-  matchesGenderFilter,
 } = require('../utils/styleTaxonomy');
 const {
   assembleOutfits,
@@ -151,21 +150,11 @@ const mapScoredGarment = ({
   selected: false,
 });
 
-const scoreCatalogGarments = ({
-  catalog,
-  briefStyles,
-  baseHsl,
-  gender,
-  genderMode = 'strict',
-}) => {
-  const genderFn =
-    genderMode === 'relaxed' ? matchesGenderFilter : matchesGenderStrict;
-
-  return catalog
-    .filter((garment) => genderFn(garment.gender, gender, garment.type))
+const scoreCatalogGarments = ({ catalog, briefStyles, baseHsl, gender }) =>
+  catalog
+    .filter((garment) => matchesGenderStrict(garment.gender, gender, garment.type))
     .map((garment) => scoreGarmentForBrief({ garment, briefStyles, baseHsl }))
     .sort((a, b) => b.combinedScore - a.combinedScore);
-};
 
 const mapScoredPool = (scored = []) =>
   scored.map(
@@ -218,7 +207,6 @@ const matchGarmentsWithColor = async ({
       briefStyles,
       baseHsl,
       gender,
-      genderMode: 'strict',
     }),
     0.5
   );
@@ -230,20 +218,6 @@ const matchGarmentsWithColor = async ({
         briefStyles,
         baseHsl,
         gender,
-        genderMode: 'strict',
-      }),
-      0
-    );
-  }
-
-  if (scored.length < 12) {
-    scored = pickPool(
-      scoreCatalogGarments({
-        catalog,
-        briefStyles,
-        baseHsl,
-        gender,
-        genderMode: 'relaxed',
       }),
       0
     );

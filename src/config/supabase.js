@@ -30,13 +30,9 @@ const getSupabase = () => {
 };
 
 const getUserSupabase = (accessToken) => {
-  if (!accessToken) {
-    throw new Error('accessToken is required for user-scoped Supabase client');
-  }
-
   const { url, key, usesServiceRole } = getSupabaseConfig();
 
-  if (usesServiceRole) {
+  if (!accessToken || usesServiceRole) {
     return getSupabase();
   }
 

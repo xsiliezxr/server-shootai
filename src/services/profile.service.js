@@ -59,7 +59,7 @@ const ensureProfile = async (user, accessToken) => {
   return upsertProfile(user.id, accessToken, {
     email: user.email || '',
     displayName: user.user_metadata?.display_name || '',
-    gender: 'unisex',
+    gender: 'man',
   });
 };
 

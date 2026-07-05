@@ -378,20 +378,13 @@ const matchesGenderFilter = (garmentGender, targetGender) => {
   return true;
 };
 
-const matchesGenderStrict = (garmentGender, targetGender, garmentType = '') => {
+const matchesGenderStrict = (garmentGender, targetGender) => {
   const garment = normalizeGender(garmentGender);
   const target = normalizeGender(targetGender);
-  const type = String(garmentType || '').toLowerCase();
 
   if (target === 'unisex') return true;
 
-  if (garment === target) return true;
-
-  if (garment === 'unisex' && NEUTRAL_GARMENT_TYPES.has(type)) {
-    return true;
-  }
-
-  return false;
+  return garment === target;
 };
 
 const inferGenderFromBrief = (freeText = '') => {

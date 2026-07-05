@@ -18,10 +18,13 @@ const mapFavoriteToApi = (row) => ({
 
 const suggestOccasion = async ({ category, garments = [], title = '', event = '' }) => {
   const garmentNames = garments.map((g) => g.name).filter(Boolean).join(', ');
-  const fallback = event || category || 'Ocasion casual';
+  const fallbackOccasion = event || category || 'Ocasion casual';
+  const fallbackTheme = title || `Look ${category || 'favorito'}`;
 
   const { apiKey } = llmService.getLlmConfig();
-  if (!apiKey) return fallback;
+  if (!apiKey) {
+    return { occasion: fallbackOccasion, theme: fallbackTheme };
+  }
 
   try {
     const { parsed } = await llmService.chatCompletion({
@@ -29,7 +32,7 @@ const suggestOccasion = async ({ category, garments = [], title = '', event = ''
         {
           role: 'system',
           content:
-            'Suggest a short occasion label for a saved outfit. Respond with JSON only: { "occasion": "..." }',
+            'Suggest labels for a saved outfit. Respond with JSON only: { "occasion": "...", "theme": "..." }',
         },
         {
           role: 'user',
@@ -37,15 +40,20 @@ const suggestOccasion = async ({ category, garments = [], title = '', event = ''
 Event/theme: ${event || title || 'none'}
 Garments: ${garmentNames || 'unknown'}
 
-Suggest one concise occasion in Spanish (e.g. "Cena formal", "Oficina casual", "Salida nocturna").`,
+Suggest in Spanish:
+- occasion: one concise occasion (e.g. "Cena formal", "Oficina casual")
+- theme: short title/theme for the outfit (e.g. "Elegancia urbana", "Weekend relajado")`,
         },
       ],
       temperature: 0.3,
     });
 
-    return parsed?.occasion || fallback;
+    return {
+      occasion: parsed?.occasion || fallbackOccasion,
+      theme: parsed?.theme || fallbackTheme,
+    };
   } catch {
-    return fallback;
+    return { occasion: fallbackOccasion, theme: fallbackTheme };
   }
 };
 
@@ -62,9 +70,13 @@ const createFavorite = async (userId, accessToken, payload) => {
 
   if (projectId) assertValidUuid(projectId, 'projectId');
 
-  const resolvedOccasion =
-    occasion ||
-    (await suggestOccasion({ category, garments, title, event }));
+  const resolved =
+    occasion && title
+      ? { occasion, theme: title }
+      : await suggestOccasion({ category, garments, title, event });
+
+  const resolvedOccasion = occasion || resolved.occasion;
+  const resolvedTitle = title || resolved.theme;
 
   const supabase = getDbClient(accessToken);
   const { data, error } = await supabase
@@ -72,7 +84,7 @@ const createFavorite = async (userId, accessToken, payload) => {
     .insert({
       user_id: userId,
       project_id: projectId || null,
-      title,
+      title: resolvedTitle,
       category,
       event,
       occasion: resolvedOccasion,
