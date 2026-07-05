@@ -18,8 +18,10 @@ const {
 } = require('../utils/outfitAssembly');
 const { assertValidUuid, handleSupabaseError } = require('../utils/supabaseHelpers');
 const profileService = require('./profile.service');
+const { MOCK_USER_ID } = require('../config/mockUser');
 
 const DEFAULT_DEMO_EMPRESA_ID = '520d6f4f-7dec-4821-9b17-2f54e35772fd';
+const PROJECT_USER_FK = 'project_user_id_fkey';
 
 const uniqueValues = (values = []) =>
   [...new Set(values.map((value) => String(value || '').trim()).filter(Boolean))];
@@ -41,6 +43,14 @@ const uniqueValuesByGarmentId = (garments = []) => {
 const resolveEmpresaId = (empresaId) =>
   empresaId || process.env.DEMO_EMPRESA_ID || DEFAULT_DEMO_EMPRESA_ID;
 
+const isMockUser = (userId) => userId === MOCK_USER_ID;
+
+const toPersistableUserId = (userId) => (userId && !isMockUser(userId) ? userId : null);
+
+const isProjectUserFkError = (error) =>
+  error?.code === '23503' &&
+  String(error?.message || '').includes(PROJECT_USER_FK);
+
 const insertProject = async (payload) => {
   const supabase = getSupabase();
   const { data, error } = await supabase
@@ -48,6 +58,16 @@ const insertProject = async (payload) => {
     .insert(payload)
     .select('*')
     .single();
+
+  if (isProjectUserFkError(error) && payload.user_id) {
+    const { data: fallback, error: fallbackError } = await supabase
+      .from('project')
+      .insert({ ...payload, user_id: null })
+      .select('*')
+      .single();
+    handleSupabaseError(fallbackError, 'Failed to create project');
+    return fallback;
+  }
 
   if (error?.message?.includes('check constraint') && payload.status === 'requirements') {
     const { data: fallback, error: fallbackError } = await supabase
@@ -83,7 +103,7 @@ const saveRequirements = async ({
   const project = await insertProject({
     empresa_id: resolvedEmpresaId,
     cliente_id: clienteId || null,
-    user_id: userId || null,
+    user_id: toPersistableUserId(userId),
     name: name || `Requirements ${new Date().toISOString()}`,
     status: 'requirements',
     free_text: freeText || '',
@@ -331,15 +351,22 @@ const processRequirements = async ({
   let profile = null;
   if (userId) {
     profile = await profileService.getProfile(userId, accessToken);
-    if (project.userId && project.userId !== userId) {
+    const persistableUserId = toPersistableUserId(userId);
+
+    if (persistableUserId && project.userId && project.userId !== persistableUserId) {
       throw new AppError('Project does not belong to this user', 403);
     }
-    if (!project.userId) {
+
+    if (persistableUserId && !project.userId) {
       const supabase = getSupabase();
-      await supabase
+      const { error: userUpdateError } = await supabase
         .from('project')
-        .update({ user_id: userId })
+        .update({ user_id: persistableUserId })
         .eq('id', projectId);
+
+      if (userUpdateError && !isProjectUserFkError(userUpdateError)) {
+        handleSupabaseError(userUpdateError, 'Failed to associate project user');
+      }
     }
   }
 

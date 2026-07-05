@@ -4,6 +4,20 @@ const bodyPhotoService = require('./bodyPhoto.service');
 const AppError = require('../utils/appError');
 const { normalizeGender } = require('../utils/styleTaxonomy');
 const { handleSupabaseError } = require('../utils/supabaseHelpers');
+const { MOCK_USER_ID, MOCK_USER } = require('../config/mockUser');
+
+const createMockProfile = (overrides = {}) => ({
+  id: MOCK_USER_ID,
+  email: MOCK_USER.email,
+  displayName: MOCK_USER.user_metadata?.display_name || 'Demo User',
+  gender: 'man',
+  bodyPhotoUrl: '',
+  bodyPhotoPublicId: '',
+  bodyAttributes: {},
+  ...overrides,
+});
+
+const isMockUser = (userId) => userId === MOCK_USER_ID;
 
 const mapProfileToApi = (row) => ({
   id: row.id,
@@ -18,6 +32,10 @@ const mapProfileToApi = (row) => ({
 });
 
 const getProfile = async (userId, accessToken) => {
+  if (isMockUser(userId)) {
+    return createMockProfile();
+  }
+
   const supabase = getDbClient(accessToken);
   const { data, error } = await supabase
     .from('app_user')
@@ -32,6 +50,18 @@ const getProfile = async (userId, accessToken) => {
 };
 
 const upsertProfile = async (userId, accessToken, { email, displayName, gender }) => {
+  if (isMockUser(userId)) {
+    return createMockProfile({
+      email: email || MOCK_USER.email,
+      displayName:
+        displayName !== undefined
+          ? displayName
+          : MOCK_USER.user_metadata?.display_name || 'Demo User',
+      gender: gender !== undefined ? normalizeGender(gender) : 'man',
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
   const supabase = getDbClient(accessToken);
   const patch = {
     id: userId,
@@ -87,6 +117,19 @@ const setBodyPhoto = async (userId, accessToken, file) => {
       `La foto no cumple los requisitos: ${issues.join('; ')}`,
       422
     );
+  }
+
+  if (isMockUser(userId)) {
+    return {
+      ...createMockProfile({
+        bodyPhotoUrl: uploaded.url,
+        bodyPhotoPublicId: uploaded.publicId,
+        bodyAttributes: attributes,
+        updatedAt: new Date().toISOString(),
+      }),
+      validation,
+      pipeline: { vision: source },
+    };
   }
 
   const supabase = getDbClient(accessToken);
