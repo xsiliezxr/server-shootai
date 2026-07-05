@@ -9,6 +9,7 @@ const creativeDumpRoutes = require('./creativeDump.routes');
 const fashionRoutes = require('./fashion.routes');
 const styleMatchRoutes = require('./styleMatch.routes');
 const visionRoutes = require('./vision.routes');
+const whatsappRoutes = require('./whatsapp.routes');
 
 const router = Router();
 
@@ -22,5 +23,6 @@ router.use('/creative-dump', creativeDumpRoutes);
 router.use('/fashion-matcher', fashionRoutes);
 router.use('/style-match', styleMatchRoutes);
 router.use('/vision', visionRoutes);
+router.use('/whatsapp', whatsappRoutes);
 
 module.exports = router;
