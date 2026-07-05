@@ -31,8 +31,13 @@ const groupGarmentsByType = (garments = []) => {
   return byType;
 };
 
-const pickFromSlot = (byType, slot, usedIds) =>
-  (byType[slot] || []).find((g) => !usedIds.has(g.garmentId));
+const pickFromSlot = (byType, slot, usedIds, index = 0, allowReuse = false) => {
+  const garments = byType[slot] || [];
+  if (allowReuse) {
+    return garments.length ? garments[index % garments.length] : null;
+  }
+  return garments.find((g) => !usedIds.has(g.garmentId));
+};
 
 const averageScore = (items = []) => {
   if (!items.length) return 0;
@@ -40,16 +45,22 @@ const averageScore = (items = []) => {
   return Math.round((sum / items.length) * 100) / 100;
 };
 
-const assembleOutfits = (garments = [], maxOutfits = 3, idPrefix = 'outfit') => {
+const assembleOutfits = (
+  garments = [],
+  maxOutfits = 3,
+  idPrefix = 'outfit',
+  options = {}
+) => {
   const byType = groupGarmentsByType(garments);
   const usedIds = new Set();
   const outfits = [];
+  const allowReuse = options.allowReuse === true;
 
   for (let i = 0; i < maxOutfits; i += 1) {
-    const dress = pickFromSlot(byType, 'dress', usedIds);
-    const top = pickFromSlot(byType, 'top', usedIds);
-    const bottom = pickFromSlot(byType, 'bottom', usedIds);
-    const footwear = pickFromSlot(byType, 'footwear', usedIds);
+    const dress = pickFromSlot(byType, 'dress', usedIds, i, allowReuse);
+    const top = pickFromSlot(byType, 'top', usedIds, i, allowReuse);
+    const bottom = pickFromSlot(byType, 'bottom', usedIds, i, allowReuse);
+    const footwear = pickFromSlot(byType, 'footwear', usedIds, i, allowReuse);
 
     if (!footwear) break;
 
@@ -77,13 +88,13 @@ const assembleOutfits = (garments = [], maxOutfits = 3, idPrefix = 'outfit') => 
     outfitGarments.push(toGarmentSlot(footwear, 'footwear'));
     usedIds.add(footwear.garmentId);
 
-    const outerwear = pickFromSlot(byType, 'outerwear', usedIds);
+    const outerwear = pickFromSlot(byType, 'outerwear', usedIds, i, allowReuse);
     if (outerwear) {
       outfitGarments.push(toGarmentSlot(outerwear, 'outerwear'));
       usedIds.add(outerwear.garmentId);
     }
 
-    const accessory = pickFromSlot(byType, 'accessory', usedIds);
+    const accessory = pickFromSlot(byType, 'accessory', usedIds, i, allowReuse);
     if (accessory) {
       outfitGarments.push(toGarmentSlot(accessory, 'accessory'));
       usedIds.add(accessory.garmentId);

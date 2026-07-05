@@ -1,9 +1,12 @@
 const styleMatchService = require('../services/styleMatch.service');
 const AppError = require('../utils/appError');
 
+const DEFAULT_DEMO_EMPRESA_ID = '520d6f4f-7dec-4821-9b17-2f54e35772fd';
+
 const styleMatch = async (req, res) => {
   const { clienteId, name, freeText, limit } = req.body;
-  const empresaId = req.body.empresaId || process.env.DEMO_EMPRESA_ID;
+  const empresaId =
+    req.body.empresaId || process.env.DEMO_EMPRESA_ID || DEFAULT_DEMO_EMPRESA_ID;
 
   if (!empresaId) {
     throw new AppError('empresaId is required (set DEMO_EMPRESA_ID)', 400);

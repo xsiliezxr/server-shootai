@@ -19,6 +19,28 @@ const {
 const { assertValidUuid, handleSupabaseError } = require('../utils/supabaseHelpers');
 const profileService = require('./profile.service');
 
+const DEFAULT_DEMO_EMPRESA_ID = '520d6f4f-7dec-4821-9b17-2f54e35772fd';
+
+const uniqueValues = (values = []) =>
+  [...new Set(values.map((value) => String(value || '').trim()).filter(Boolean))];
+
+const uniqueValuesByGarmentId = (garments = []) => {
+  const seen = new Set();
+  const result = [];
+
+  for (const garment of garments) {
+    const key = garment.garmentId || garment.id;
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    result.push(garment);
+  }
+
+  return result;
+};
+
+const resolveEmpresaId = (empresaId) =>
+  empresaId || process.env.DEMO_EMPRESA_ID || DEFAULT_DEMO_EMPRESA_ID;
+
 const insertProject = async (payload) => {
   const supabase = getSupabase();
   const { data, error } = await supabase
@@ -50,18 +72,16 @@ const saveRequirements = async ({
   documentFiles = [],
   userId,
 }) => {
-  if (!empresaId) {
-    throw new AppError('empresaId is required (set DEMO_EMPRESA_ID)', 400);
-  }
+  const resolvedEmpresaId = resolveEmpresaId(empresaId);
 
-  assertValidUuid(empresaId, 'empresaId');
+  assertValidUuid(resolvedEmpresaId, 'empresaId');
 
   if (clienteId) {
     assertValidUuid(clienteId, 'clienteId');
   }
 
   const project = await insertProject({
-    empresa_id: empresaId,
+    empresa_id: resolvedEmpresaId,
     cliente_id: clienteId || null,
     user_id: userId || null,
     name: name || `Requirements ${new Date().toISOString()}`,
@@ -368,8 +388,14 @@ const processRequirements = async ({
   const resolvedBaseColor =
     baseColor || profileColors[0] || null;
 
-  const categoriesToProcess =
-    canonicalCategories.length > 0 ? canonicalCategories : ['casual'];
+  const categoriesToProcess = uniqueValues([
+    ...canonicalCategories,
+    ...canonicalizeStyles(aestheticTags),
+  ]);
+  if (categoriesToProcess.length === 0) {
+    categoriesToProcess.push('casual');
+  }
+  const minOutfitsPerCategory = categoriesToProcess.length === 1 ? 3 : 2;
 
   const outfitsByCategory = [];
   let allOutfits = [];
@@ -388,7 +414,11 @@ const processRequirements = async ({
 
     if (catColorApplied) colorApplied = true;
 
-    let categoryOutfits = assembleOutfits(scoredGarments, 3, category);
+    let categoryOutfits = assembleOutfits(
+      scoredGarments,
+      Math.max(3, minOutfitsPerCategory),
+      category
+    );
 
     if (categoryOutfits.length === 0) {
       const { garments: broadPool } = await matchGarmentsWithColor({
@@ -399,7 +429,21 @@ const processRequirements = async ({
         gender: targetGender,
         poolLimit: Math.max(Number(limit) || 8, 80),
       });
-      categoryOutfits = assembleOutfits(broadPool, 3, category);
+      categoryOutfits = assembleOutfits(
+        uniqueValuesByGarmentId([...scoredGarments, ...broadPool]),
+        Math.max(3, minOutfitsPerCategory),
+        category,
+        { allowReuse: categoryOutfits.length < minOutfitsPerCategory }
+      );
+    }
+
+    if (categoryOutfits.length < minOutfitsPerCategory) {
+      categoryOutfits = assembleOutfits(
+        scoredGarments,
+        minOutfitsPerCategory,
+        category,
+        { allowReuse: true }
+      );
     }
 
     if (categoryOutfits.length === 0) continue;
