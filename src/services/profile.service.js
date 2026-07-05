@@ -19,6 +19,18 @@ const createMockProfile = (overrides = {}) => ({
 
 const isMockUser = (userId) => userId === MOCK_USER_ID;
 
+const fetchProfile = async (userId, accessToken) => {
+  const supabase = getDbClient(accessToken);
+  const { data, error } = await supabase
+    .from('app_user')
+    .select('*')
+    .eq('id', userId)
+    .maybeSingle();
+
+  handleSupabaseError(error, 'Failed to fetch profile');
+  return data ? mapProfileToApi(data) : null;
+};
+
 const mapProfileToApi = (row) => ({
   id: row.id,
   email: row.email,
@@ -33,25 +45,19 @@ const mapProfileToApi = (row) => ({
 
 const getProfile = async (userId, accessToken) => {
   if (isMockUser(userId)) {
-    return createMockProfile();
+    try {
+      return (await fetchProfile(userId, accessToken)) || createMockProfile();
+    } catch {
+      return createMockProfile();
+    }
   }
 
-  const supabase = getDbClient(accessToken);
-  const { data, error } = await supabase
-    .from('app_user')
-    .select('*')
-    .eq('id', userId)
-    .maybeSingle();
-
-  handleSupabaseError(error, 'Failed to fetch profile');
-
-  if (!data) return null;
-  return mapProfileToApi(data);
+  return fetchProfile(userId, accessToken);
 };
 
 const upsertProfile = async (userId, accessToken, { email, displayName, gender }) => {
   if (isMockUser(userId)) {
-    return createMockProfile({
+    const fallback = createMockProfile({
       email: email || MOCK_USER.email,
       displayName:
         displayName !== undefined
@@ -60,6 +66,29 @@ const upsertProfile = async (userId, accessToken, { email, displayName, gender }
       gender: gender !== undefined ? normalizeGender(gender) : 'man',
       updatedAt: new Date().toISOString(),
     });
+
+    try {
+      const supabase = getDbClient(accessToken);
+      const { data, error } = await supabase
+        .from('app_user')
+        .upsert(
+          {
+            id: userId,
+            email: fallback.email,
+            display_name: fallback.displayName,
+            gender: fallback.gender,
+            updated_at: fallback.updatedAt,
+          },
+          { onConflict: 'id' }
+        )
+        .select('*')
+        .single();
+
+      handleSupabaseError(error, 'Failed to upsert profile');
+      return mapProfileToApi(data);
+    } catch {
+      return fallback;
+    }
   }
 
   const supabase = getDbClient(accessToken);
