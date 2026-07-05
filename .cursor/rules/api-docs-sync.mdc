@@ -1,0 +1,56 @@
+---
+description: Sincronización obligatoria de documentación API al modificar endpoints
+globs: src/routes/**/*.js,src/controllers/**/*.js
+alwaysApply: false
+---
+
+# Regla estricta: actualizar API_DOCS.md
+
+Cada vez que **crees, modifiques o elimines** un endpoint, debes actualizar obligatoriamente `docs/API_DOCS.md` en el mismo cambio.
+
+## Qué documentar por endpoint
+
+1. **Método HTTP** (GET, POST, PUT, PATCH, DELETE)
+2. **Ruta** (relativa a `/api`, ej. `/users/:id`)
+3. **Body esperado** (JSON con campos y tipos; indicar "Ninguno" si no aplica)
+4. **Respuesta de éxito** con código HTTP y JSON de ejemplo
+5. **Respuestas de error** relevantes con código HTTP y JSON de ejemplo
+
+## Formato requerido
+
+```markdown
+### Nombre del endpoint
+
+| Campo  | Valor        |
+|--------|--------------|
+| Método | `POST`       |
+| Ruta   | `/recurso`   |
+
+#### Body esperado
+
+\`\`\`json
+{ "campo": "valor" }
+\`\`\`
+
+#### Respuesta de éxito — `201 Created`
+
+\`\`\`json
+{ "success": true, "data": {} }
+\`\`\`
+
+#### Respuesta de error — `400 Bad Request`
+
+\`\`\`json
+{ "success": false, "error": { "message": "..." } }
+\`\`\`
+```
+
+## Al eliminar un endpoint
+
+Elimina su sección completa de `docs/API_DOCS.md`.
+
+## Checklist antes de terminar
+
+- [ ] Endpoint implementado en routes → controller → service
+- [ ] `docs/API_DOCS.md` actualizado con el mismo cambio
+- [ ] Respuestas JSON siguen el formato `{ success, data/error }` del proyecto
