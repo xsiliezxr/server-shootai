@@ -6,7 +6,45 @@
 
 ---
 
-## Endpoints
+## Índice de endpoints
+
+| Módulo | Método | Ruta | Descripción |
+|--------|--------|------|-------------|
+| Health | `GET` | `/health` | Estado del servidor |
+| Empresas | `POST` | `/empresas` | Crear empresa |
+| Empresas | `GET` | `/empresas` | Listar empresas |
+| Empresas | `GET` | `/empresas/:id` | Obtener empresa |
+| Empresas | `PATCH` | `/empresas/:id` | Actualizar empresa |
+| Empresas | `DELETE` | `/empresas/:id` | Eliminar empresa |
+| Clientes | `POST` | `/clientes` | Crear cliente |
+| Clientes | `GET` | `/clientes` | Listar clientes |
+| Clientes | `GET` | `/clientes/:id` | Obtener cliente |
+| Clientes | `PATCH` | `/clientes/:id` | Actualizar cliente |
+| Clientes | `DELETE` | `/clientes/:id` | Eliminar cliente |
+| Projects | `POST` | `/projects` | Crear proyecto/sesión |
+| Projects | `GET` | `/projects` | Listar proyectos |
+| Projects | `GET` | `/projects/:id` | Obtener proyecto |
+| Projects | `PATCH` | `/projects/:id` | Actualizar proyecto |
+| Projects | `DELETE` | `/projects/:id` | Eliminar proyecto |
+| Projects | `GET` | `/projects/:id/export` | Export consolidado |
+| Requirements | `POST` | `/requirements` | **A.** Guardar requerimientos (texto/imagen/docs) |
+| Requirements | `POST` | `/requirements/:projectId/process` | **B.** Procesar y recomendar prendas |
+| Requirements | `POST` | `/requirements/:projectId/shoot-plan` | **C.** Plan de shoot mock (poses/ángulos) |
+| Style Match | `POST` | `/style-match` | Atajo pre-shoot todo-en-uno |
+| Creative Dump | `POST` | `/creative-dump` | Ingesta brief en proyecto existente |
+| Catálogo | `POST` | `/catalog` | Agregar prendas |
+| Catálogo | `GET` | `/catalog` | Listar prendas |
+| Catálogo | `POST` | `/catalog/color-match` | Matching por teoría del color |
+| Scraping | `POST` | `/catalog/scrape` | Scrapear catálogo de marca (Firecrawl) |
+| Fashion | `POST` | `/fashion-matcher` | Recomendar por tags del proyecto |
+| Vision | `POST` | `/vision/upload-model` | Subir foto modelo + recomendación cámara/pose |
+| WhatsApp | `POST` | `/whatsapp/webhook` | Evento entrante (mock n8n) |
+| WhatsApp | `POST` | `/whatsapp/send` | Mensaje saliente |
+| WhatsApp | `POST` | `/whatsapp/send-analysis` | Resumen estructurado para WhatsApp |
+
+> **Flujo recomendado (pre-shoot):** `POST /requirements` → `POST /requirements/:id/process` → `POST /requirements/:id/shoot-plan`
+
+---
 
 ### Health Check
 
@@ -1306,4 +1344,10 @@ Toma el `visionAnalysis` y los `recommendedGarments` del proyecto y arma un mens
 
 \* Al menos una de `SUPABASE_SERVICE_ROLE_KEY` o `SUPABASE_ANON_KEY` es requerida.
 
-\** Requerida solo para endpoints que suben imágenes (`/creative-dump`, `/style-match`, `/vision/upload-model`).
+\** Requerida solo para endpoints que suben imágenes (`/creative-dump`, `/style-match`, `/requirements`, `/vision/upload-model`).
+
+---
+
+## Verificación automatizada
+
+Ejecuta `npm run test:endpoints` para validar todos los endpoints documentados. Resultados detallados en [`docs/ENDPOINTS_VERIFY.md`](./ENDPOINTS_VERIFY.md).

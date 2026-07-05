@@ -1,4 +1,10 @@
 const axios = require('axios');
+const {
+  CANONICAL_STYLES,
+  canonicalizeStyles,
+  inferGenderFromBrief,
+  normalizeGender,
+} = require('../utils/styleTaxonomy');
 
 const MOCK_TAG_POOL = [
   'minimalist', 'editorial', 'streetwear', 'luxury', 'bohemian', 'monochrome',
@@ -7,8 +13,8 @@ const MOCK_TAG_POOL = [
 ];
 
 const MOCK_CATEGORY_POOL = [
-  'streetwear', 'baggy', 'minimalist', 'luxury', 'editorial', 'sportswear',
-  'casual', 'formal', 'vintage', 'avant-garde',
+  'streetwear', 'minimalist', 'luxury', 'sportswear',
+  'casual', 'formal', 'vintage', 'avant-garde', 'smart-casual', 'elegant',
 ];
 
 const STOPWORDS = new Set([
@@ -76,15 +82,24 @@ const buildMockResult = (freeText = '', imageCount = 0, documentText = '') => {
     tags.add('sportswear');
     categories.add('sportswear');
   }
+  if (combined.toLowerCase().includes('casual')) {
+    categories.add('casual');
+  }
+  if (combined.toLowerCase().includes('formal')) {
+    categories.add('formal');
+  }
 
   MOCK_TAG_POOL.slice(0, 3 + Math.min(imageCount, 3)).forEach((tag) => tags.add(tag));
   MOCK_CATEGORY_POOL.slice(0, 2 + Math.min(imageCount, 2)).forEach((cat) =>
     categories.add(cat)
   );
 
+  const gender = inferGenderFromBrief(combined);
+
   return {
-    categories: Array.from(categories).slice(0, 6),
+    categories: canonicalizeStyles(Array.from(categories)).slice(0, 6),
     aestheticTags: Array.from(tags).slice(0, 10),
+    gender,
   };
 };
 
@@ -209,13 +224,16 @@ ${freeText || '(none)'}${documentBlock}
 
 Return ONLY valid JSON with this exact shape:
 {
-  "categories": ["streetwear", "baggy", "minimalist"],
-  "aestheticTags": ["urban", "oversized", "monochrome"]
+  "categories": ["casual", "minimalist"],
+  "aestheticTags": ["relaxed", "clean lines"],
+  "gender": "man"
 }
 
 Rules:
-- categories: broad style buckets (streetwear, baggy, luxury, minimalist, sportswear, casual, formal, vintage, avant-garde, y2k, etc.)
-- aestheticTags: finer visual/mood descriptors
+- categories: ONLY from this fixed list: ${CANONICAL_STYLES.join(', ')}
+- aestheticTags: finer visual/mood descriptors (not garment types like top/bottom/pants)
+- gender: infer target audience from brief/images as "man", "woman", "unisex", or "kids"
+- Do NOT confuse casual with streetwear unless the brief explicitly asks for streetwear/urban/edgy looks
 - lowercase, no duplicates, max 10 items each
 - infer from images when provided
 - respond in the same language as the brief when tagging mood words`,
@@ -242,8 +260,9 @@ Rules:
   });
 
   return {
-    categories: normalizeList(parsed.categories),
+    categories: canonicalizeStyles(parsed.categories),
     aestheticTags: normalizeList(parsed.aestheticTags || parsed.tags),
+    gender: normalizeGender(parsed.gender || inferGenderFromBrief(freeText)),
     source,
     raw: parsed,
   };
@@ -321,6 +340,7 @@ const extractAestheticTags = async ({
   return {
     categories: mock.categories,
     aestheticTags: mock.aestheticTags,
+    gender: mock.gender,
     source: 'mock',
     raw: {
       prompt: freeText,

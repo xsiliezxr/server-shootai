@@ -8,7 +8,9 @@
     "dev": "nodemon src/server.js",
     "seed": "node src/seed/catalog.seed.js",
     "scrape:zara": "node scripts/scrape-zara-batch.js",
-    "scrape:zara:full": "node scripts/scrape-zara-full.js"
+    "scrape:zara:full": "node scripts/scrape-zara-full.js",
+    "backfill:gender": "node scripts/backfill-gender.js",
+    "test:endpoints": "node scripts/test-endpoints.js"
   },
   "keywords": [],
   "author": "",

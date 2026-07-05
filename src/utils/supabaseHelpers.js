@@ -75,6 +75,7 @@ const mapGarmentToApi = (g) => ({
   currency: g.currency || 'USD',
   source: g.source || 'manual',
   active: g.active !== false,
+  gender: g.gender || 'unisex',
   createdAt: g.created_at,
 });
 
@@ -129,6 +130,7 @@ const mapProjectToApi = (project, relations = {}) => {
     id: project.id,
     empresaId: project.empresa_id,
     clienteId: project.cliente_id,
+    userId: project.user_id || null,
     name: project.name,
     status: project.status,
     creativeDump: {

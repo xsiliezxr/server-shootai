@@ -11,6 +11,8 @@ const whatsappRoutes = require('./whatsapp.routes');
 const empresaRoutes = require('./empresa.routes');
 const clienteRoutes = require('./cliente.routes');
 const requirementsRoutes = require('./requirements.routes');
+const profileRoutes = require('./profile.routes');
+const favoritesRoutes = require('./favorites.routes');
 
 const router = Router();
 
@@ -24,6 +26,8 @@ router.use('/catalog', scrapingRoutes);
 router.use('/fashion-matcher', fashionRoutes);
 router.use('/style-match', styleMatchRoutes);
 router.use('/requirements', requirementsRoutes);
+router.use('/profile', profileRoutes);
+router.use('/favorites', favoritesRoutes);
 router.use('/vision', visionRoutes);
 router.use('/whatsapp', whatsappRoutes);
 

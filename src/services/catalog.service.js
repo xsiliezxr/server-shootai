@@ -1,3 +1,4 @@
+const { getSupabase } = require('../config/supabase');
 const { getCatalogSupabase } = require('../config/supabaseCatalog');
 const projectService = require('./project.service');
 const AppError = require('../utils/appError');
@@ -10,6 +11,13 @@ const {
   isValidProductImage,
   handleSupabaseError,
 } = require('../utils/supabaseHelpers');
+const {
+  styleMatchScore,
+  inferGenderFromText,
+  canonicalizeStyles,
+  matchesGenderStrict,
+  matchesGenderFilter,
+} = require('../utils/styleTaxonomy');
 
 const normalizeGarment = (g, empresaId) => {
   if (!g || !g.name || !g.type) {
@@ -29,6 +37,13 @@ const normalizeGarment = (g, empresaId) => {
     name: g.name,
     brand: g.brand || '',
     type: g.type,
+    gender:
+      g.gender ||
+      inferGenderFromText(g.name, g.type, [
+        ...(g.categories || []),
+        ...(g.aestheticTags || g.tags || []),
+        g.productUrl || '',
+      ]),
     color: g.color || '',
     color_hex: g.colorHex || '',
     color_hsl: g.colorHsl || null,
@@ -110,13 +125,43 @@ const scoreGarmentByCategories = (garmentCategories = [], extractedCategories = 
   };
 };
 
-const recommendForProject = async ({ projectId, limit = 8 }) => {
+const scoreGarmentsByStyle = (garment, briefStyles = []) => {
+  const allTags = normalizeTags([
+    ...(garment.aesthetic_tags || []),
+    ...(garment.categories || []),
+  ]);
+  const { score, matchedStyles } = styleMatchScore(allTags, briefStyles);
+
+  return {
+    score,
+    matchedCategories: matchedStyles,
+    matchedStyles,
+  };
+};
+
+const mapScoredGarment = ({ garment, score, matchedStyles }) => ({
+  garmentId: garment.id,
+  name: garment.name,
+  brand: garment.brand,
+  type: garment.type,
+  gender: garment.gender || 'unisex',
+  color: garment.color,
+  silhouette: garment.silhouette,
+  imageUrl: garment.image_url,
+  productUrl: garment.product_url,
+  score: Math.round(score * 100) / 100,
+  matchedCategories: matchedStyles,
+  matchedTags: matchedStyles,
+  selected: false,
+});
+
+const recommendForProject = async ({ projectId, limit = 8, gender }) => {
   const project = await projectService.findProjectById(projectId);
   const projectTags = normalizeTags(project.creativeDump?.aestheticTags);
   const projectCategories = normalizeTags(
     project.creativeDump?.extractedCategories
   );
-  const matchTags = [...new Set([...projectTags, ...projectCategories])];
+  const briefStyles = canonicalizeStyles([...projectTags, ...projectCategories]);
 
   const supabase = getCatalogSupabase();
   const { data: catalog, error } = await supabase
@@ -135,41 +180,26 @@ const recommendForProject = async ({ projectId, limit = 8 }) => {
   }
 
   const scored = catalog
+    .filter((g) => matchesGenderStrict(g.gender, gender, g.type))
     .map((g) => {
-      const allTags = [
-        ...new Set(
-          normalizeTags([...(g.aesthetic_tags || []), ...(g.categories || [])])
-        ),
-      ];
-      const { score, matchedCategories } = scoreGarmentByCategories(
-        allTags,
-        matchTags
-      );
-
-      return { garment: g, score, matchedCategories };
+      const { score, matchedStyles } = scoreGarmentsByStyle(g, briefStyles);
+      return { garment: g, score, matchedStyles };
     })
     .sort((a, b) => b.score - a.score);
 
   const top = scored.slice(0, Number(limit) || 8);
 
-  const recommendedGarments = top.map(({ garment, score, matchedCategories }) => ({
-    garmentId: garment.id,
-    name: garment.name,
-    brand: garment.brand,
-    type: garment.type,
-    color: garment.color,
-    silhouette: garment.silhouette,
-    imageUrl: garment.image_url,
-    productUrl: garment.product_url,
-    score,
-    matchedTags: matchedCategories,
-    matchedCategories,
-    selected: false,
-  }));
+  const recommendedGarments = top.map(({ garment, score, matchedStyles }) =>
+    mapScoredGarment({ garment, score, matchedStyles })
+  );
 
-  await projectService.saveRecommendations(projectId, recommendedGarments);
+  try {
+    await projectService.saveRecommendations(projectId, recommendedGarments);
+  } catch (err) {
+    console.warn('saveRecommendations skipped (catalog FK):', err.message);
+  }
 
-  const supabaseClient = getCatalogSupabase();
+  const supabaseClient = getSupabase();
   await supabaseClient
     .from('project')
     .update({ status: project.status === 'draft' ? 'processing' : project.status })
@@ -177,7 +207,7 @@ const recommendForProject = async ({ projectId, limit = 8 }) => {
 
   return {
     projectId: project._id,
-    basedOnTags: matchTags,
+    basedOnTags: briefStyles,
     count: recommendedGarments.length,
     recommendedGarments,
   };
@@ -188,10 +218,13 @@ const matchGarmentsForEmpresa = async ({
   categories = [],
   aestheticTags = [],
   limit = 8,
+  gender,
+  poolLimit,
 }) => {
   assertValidUuid(empresaId, 'empresaId');
 
-  const matchTags = normalizeTags([...categories, ...aestheticTags]);
+  const briefStyles = canonicalizeStyles([...categories, ...aestheticTags]);
+  const fetchLimit = Number(poolLimit) || Math.max(Number(limit) || 8, 40);
 
   const supabase = getCatalogSupabase();
   const { data: catalog, error } = await supabase
@@ -210,38 +243,33 @@ const matchGarmentsForEmpresa = async ({
   }
 
   const scored = catalog
+    .filter((g) => matchesGenderStrict(g.gender, gender, g.type))
     .map((g) => {
-      const allTags = [
-        ...new Set(
-          normalizeTags([...(g.aesthetic_tags || []), ...(g.categories || [])])
-        ),
-      ];
-      const { score, matchedCategories } = scoreGarmentByCategories(
-        allTags,
-        matchTags
-      );
-
-      return { garment: g, score, matchedCategories };
+      const { score, matchedStyles } = scoreGarmentsByStyle(g, briefStyles);
+      return { garment: g, score, matchedStyles };
     })
     .filter(({ score }) => score > 0)
     .sort((a, b) => b.score - a.score);
 
-  const top = scored.slice(0, Number(limit) || 8);
+  let top = scored.slice(0, fetchLimit);
 
-  return top.map(({ garment, score, matchedCategories }) => ({
-    garmentId: garment.id,
-    name: garment.name,
-    brand: garment.brand,
-    type: garment.type,
-    color: garment.color,
-    silhouette: garment.silhouette,
-    imageUrl: garment.image_url,
-    productUrl: garment.product_url,
-    score,
-    matchedCategories,
-    matchedTags: matchedCategories,
-    selected: false,
-  }));
+  if (top.length === 0) {
+    const relaxed = catalog
+      .filter((g) => matchesGenderFilter(g.gender, gender))
+      .map((g) => {
+        const { score, matchedStyles } = scoreGarmentsByStyle(g, briefStyles);
+        return { garment: g, score, matchedStyles };
+      })
+      .filter(({ score }) => score >= 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, fetchLimit);
+
+    top = relaxed;
+  }
+
+  return top.map(({ garment, score, matchedStyles }) =>
+    mapScoredGarment({ garment, score, matchedStyles })
+  );
 };
 
 const countGarments = async (empresaId) => {
@@ -330,4 +358,5 @@ module.exports = {
   matchGarmentsByColor,
   countGarments,
   scoreGarmentByCategories,
+  scoreGarmentsByStyle,
 };

@@ -2,12 +2,11 @@ const { createClient } = require('@supabase/supabase-js');
 
 let supabase = null;
 
-const getSupabase = () => {
-  if (supabase) return supabase;
-
+const getSupabaseConfig = () => {
   const url = process.env.SUPABASE_URL;
-  const key =
-    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  const anonKey = process.env.SUPABASE_ANON_KEY?.trim();
+  const key = serviceRoleKey || anonKey;
 
   if (!url || !key) {
     throw new Error(
@@ -15,12 +14,43 @@ const getSupabase = () => {
     );
   }
 
+  return { url, key, usesServiceRole: Boolean(serviceRoleKey) };
+};
+
+const getSupabase = () => {
+  if (supabase) return supabase;
+
+  const { url, key } = getSupabaseConfig();
+
   supabase = createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
   return supabase;
 };
+
+const getUserSupabase = (accessToken) => {
+  if (!accessToken) {
+    throw new Error('accessToken is required for user-scoped Supabase client');
+  }
+
+  const { url, key, usesServiceRole } = getSupabaseConfig();
+
+  if (usesServiceRole) {
+    return getSupabase();
+  }
+
+  return createClient(url, key, {
+    global: {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+};
+
+const getDbClient = (accessToken) => getUserSupabase(accessToken);
 
 const checkSupabaseConnection = async () => {
   const client = getSupabase();
@@ -33,4 +63,9 @@ const checkSupabaseConnection = async () => {
   return true;
 };
 
-module.exports = { getSupabase, checkSupabaseConnection };
+module.exports = {
+  getSupabase,
+  getUserSupabase,
+  getDbClient,
+  checkSupabaseConnection,
+};

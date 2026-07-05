@@ -3,6 +3,7 @@ const catalogService = require('./catalog.service');
 const llmService = require('./llm.service');
 const colorService = require('./color.service');
 const AppError = require('../utils/appError');
+const { inferGenderFromListingUrl } = require('../utils/styleTaxonomy');
 const {
   assertValidUuid,
   normalizeTags,
@@ -361,6 +362,8 @@ const scrapeCatalog = async ({ empresaId, brand, url, limit = 20 }) => {
 
   assertValidUuid(empresaId, 'empresaId');
 
+  const listingGender = inferGenderFromListingUrl(url) || 'unisex';
+
   const { products: scraped, source, skippedWithoutImage = 0 } =
     await scrapeWithFirecrawl(url);
 
@@ -394,6 +397,7 @@ const scrapeCatalog = async ({ empresaId, brand, url, limit = 20 }) => {
       name: product.name,
       brand: brand || '',
       type: classification.type || 'top',
+      gender: listingGender,
       categories: classification.categories,
       aestheticTags: classification.aestheticTags,
       imageUrl: product.imageUrl || '',

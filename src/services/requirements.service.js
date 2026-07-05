@@ -6,12 +6,19 @@ const documentService = require('./document.service');
 const llmService = require('./llm.service');
 const catalogService = require('./catalog.service');
 const AppError = require('../utils/appError');
-const { parseBaseColor, colorHarmonyScore } = require('../utils/colorTheory');
+const { parseBaseColor } = require('../utils/colorTheory');
 const {
-  assertValidUuid,
-  normalizeTags,
-  handleSupabaseError,
-} = require('../utils/supabaseHelpers');
+  canonicalizeStyles,
+  resolveTargetGender,
+  matchesGenderStrict,
+  matchesGenderFilter,
+} = require('../utils/styleTaxonomy');
+const {
+  assembleOutfits,
+  scoreGarmentForBrief,
+} = require('../utils/outfitAssembly');
+const { assertValidUuid, handleSupabaseError } = require('../utils/supabaseHelpers');
+const profileService = require('./profile.service');
 
 const insertProject = async (payload) => {
   const supabase = getSupabase();
@@ -42,6 +49,7 @@ const saveRequirements = async ({
   freeText,
   imageFiles = [],
   documentFiles = [],
+  userId,
 }) => {
   if (!empresaId) {
     throw new AppError('empresaId is required (set DEMO_EMPRESA_ID)', 400);
@@ -56,6 +64,7 @@ const saveRequirements = async ({
   const project = await insertProject({
     empresa_id: empresaId,
     cliente_id: clienteId || null,
+    user_id: userId || null,
     name: name || `Requirements ${new Date().toISOString()}`,
     status: 'requirements',
     free_text: freeText || '',
@@ -117,15 +126,70 @@ const saveRequirements = async ({
   };
 };
 
+const mapScoredGarment = ({
+  garment,
+  combinedScore,
+  matchedStyles,
+  colorScore,
+  colorHarmony,
+}) => ({
+  garmentId: garment.id,
+  name: garment.name,
+  brand: garment.brand,
+  type: garment.type,
+  gender: garment.gender || 'unisex',
+  color: garment.color,
+  silhouette: garment.silhouette,
+  imageUrl: garment.image_url,
+  productUrl: garment.product_url,
+  score: Math.round(combinedScore * 100) / 100,
+  categoryScore: matchedStyles.length,
+  colorScore: colorScore ? Math.round(colorScore * 100) / 100 : 0,
+  colorHarmony: colorHarmony || 'none',
+  matchedCategories: matchedStyles,
+  matchedTags: matchedStyles,
+  selected: false,
+});
+
+const scoreCatalogGarments = ({
+  catalog,
+  briefStyles,
+  baseHsl,
+  gender,
+  genderMode = 'strict',
+}) => {
+  const genderFn =
+    genderMode === 'relaxed' ? matchesGenderFilter : matchesGenderStrict;
+
+  return catalog
+    .filter((garment) => genderFn(garment.gender, gender, garment.type))
+    .map((garment) => scoreGarmentForBrief({ garment, briefStyles, baseHsl }))
+    .sort((a, b) => b.combinedScore - a.combinedScore);
+};
+
+const mapScoredPool = (scored = []) =>
+  scored.map(
+    ({ garment, combinedScore, matchedStyles, colorScore, colorHarmony }) =>
+      mapScoredGarment({
+        garment,
+        combinedScore,
+        matchedStyles,
+        colorScore,
+        colorHarmony,
+      })
+  );
+
 const matchGarmentsWithColor = async ({
   empresaId,
   categories = [],
   aestheticTags = [],
   baseColor,
-  limit = 8,
+  gender,
+  poolLimit = 50,
 }) => {
-  const matchTags = normalizeTags([...categories, ...aestheticTags]);
+  const briefStyles = canonicalizeStyles([...categories, ...aestheticTags]);
   const baseHsl = baseColor ? parseBaseColor(baseColor) : null;
+  const limit = Number(poolLimit) || 50;
 
   const supabase = getCatalogSupabase();
   const { data: catalog, error } = await supabase
@@ -143,81 +207,68 @@ const matchGarmentsWithColor = async ({
     );
   }
 
-  const scored = catalog
-    .map((garment) => {
-      const allTags = normalizeTags([
-        ...(garment.aesthetic_tags || []),
-        ...(garment.categories || []),
-      ]);
-      const { score: categoryScore, matchedCategories } =
-        catalogService.scoreGarmentByCategories(allTags, matchTags);
+  const pickPool = (scored, minScore) =>
+    scored.filter(({ combinedScore, styleScore }) =>
+      baseHsl ? combinedScore >= minScore : styleScore >= minScore
+    );
 
-      let colorScore = 0;
-      let colorHarmony = null;
+  let scored = pickPool(
+    scoreCatalogGarments({
+      catalog,
+      briefStyles,
+      baseHsl,
+      gender,
+      genderMode: 'strict',
+    }),
+    0.5
+  );
 
-      if (baseHsl && garment.color_hsl) {
-        const harmony = colorHarmonyScore(baseHsl, garment.color_hsl);
-        colorScore = harmony.score;
-        colorHarmony = harmony.harmony;
-      }
+  if (scored.length < 12) {
+    scored = pickPool(
+      scoreCatalogGarments({
+        catalog,
+        briefStyles,
+        baseHsl,
+        gender,
+        genderMode: 'strict',
+      }),
+      0
+    );
+  }
 
-      const combinedScore = baseHsl
-        ? categoryScore + colorScore * 2
-        : categoryScore;
+  if (scored.length < 12) {
+    scored = pickPool(
+      scoreCatalogGarments({
+        catalog,
+        briefStyles,
+        baseHsl,
+        gender,
+        genderMode: 'relaxed',
+      }),
+      0
+    );
+  }
 
-      return {
-        garment,
-        categoryScore,
-        colorScore,
-        colorHarmony,
-        combinedScore,
-        matchedCategories,
-      };
-    })
-    .filter(({ combinedScore, categoryScore }) =>
-      baseHsl ? combinedScore > 0 : categoryScore > 0
-    )
-    .sort((a, b) => b.combinedScore - a.combinedScore)
-    .slice(0, Number(limit) || 8);
+  scored = scored.slice(0, limit);
 
   if (scored.length === 0) {
     const fallback = await catalogService.matchGarmentsForEmpresa({
       empresaId,
       categories,
       aestheticTags,
-      limit,
+      gender,
+      poolLimit: limit,
     });
     return { garments: fallback, colorApplied: false };
   }
 
-  const garments = scored.map(
-    ({ garment, combinedScore, matchedCategories, colorScore, colorHarmony }) => ({
-      garmentId: garment.id,
-      name: garment.name,
-      brand: garment.brand,
-      type: garment.type,
-      color: garment.color,
-      silhouette: garment.silhouette,
-      imageUrl: garment.image_url,
-      productUrl: garment.product_url,
-      score: Math.round(combinedScore * 100) / 100,
-      categoryScore: matchedCategories.length,
-      colorScore: colorScore ? Math.round(colorScore * 100) / 100 : 0,
-      colorHarmony: colorHarmony || 'none',
-      matchedCategories,
-      matchedTags: matchedCategories,
-      selected: false,
-    })
-  );
-
-  return { garments, colorApplied: Boolean(baseHsl) };
+  return {
+    garments: mapScoredPool(scored),
+    colorApplied: Boolean(baseHsl),
+  };
 };
 
-const processRequirements = async ({
-  projectId,
-  limit = 8,
-  baseColor,
-}) => {
+const detectCategories = async ({ projectId, gender }) => {
   assertValidUuid(projectId, 'projectId');
 
   const project = await projectService.findProjectById(projectId);
@@ -232,24 +283,205 @@ const processRequirements = async ({
     documentTexts,
   });
 
+  const targetGender = resolveTargetGender(gender, llmResult.gender);
+  const canonicalCategories = canonicalizeStyles(llmResult.categories);
+  const tags = [
+    ...canonicalCategories,
+    ...(llmResult.aestheticTags || []),
+  ];
+
   const supabase = getSupabase();
   await supabase
     .from('project')
     .update({
-      extracted_categories: llmResult.categories,
+      extracted_categories: canonicalCategories,
       aesthetic_tags: llmResult.aestheticTags,
       status: 'processing',
     })
     .eq('id', projectId);
 
-  const { garments: recommendedGarments, colorApplied } =
-    await matchGarmentsWithColor({
-      empresaId: project.empresaId,
-      categories: llmResult.categories,
-      aestheticTags: llmResult.aestheticTags,
-      baseColor,
-      limit,
+  return {
+    projectId,
+    extractedCategories: canonicalCategories,
+    aestheticTags: llmResult.aestheticTags,
+    gender: targetGender,
+    tags,
+    pipeline: {
+      llm: llmResult.source,
+      stage: 'category-detection',
+    },
+  };
+};
+
+const computeMatchPercentage = (outfits, briefStyles, colorApplied) => {
+  const maxTheoreticalScore = briefStyles.length * 2 + (colorApplied ? 2 : 0);
+  const bestScore = outfits[0]?.score ?? 0;
+  return maxTheoreticalScore > 0
+    ? Math.min(100, Math.round((bestScore / maxTheoreticalScore) * 100))
+    : 0;
+};
+
+const processRequirements = async ({
+  projectId,
+  limit = 8,
+  baseColor,
+  gender,
+  userId,
+  accessToken,
+}) => {
+  assertValidUuid(projectId, 'projectId');
+
+  const project = await projectService.findProjectById(projectId);
+  const creativeDump = project.creativeDump || {};
+
+  let profile = null;
+  if (userId) {
+    profile = await profileService.getProfile(userId, accessToken);
+    if (project.userId && project.userId !== userId) {
+      throw new AppError('Project does not belong to this user', 403);
+    }
+    if (!project.userId) {
+      const supabase = getSupabase();
+      await supabase
+        .from('project')
+        .update({ user_id: userId })
+        .eq('id', projectId);
+    }
+  }
+
+  let canonicalCategories = canonicalizeStyles(
+    creativeDump.extractedCategories || []
+  );
+  let aestheticTags = creativeDump.aestheticTags || [];
+  let targetGender = resolveTargetGender(
+    gender || profile?.gender,
+    null
+  );
+  let llmSource = 'stored';
+
+  if (canonicalCategories.length === 0 && aestheticTags.length === 0) {
+    const imageUrls = (creativeDump.images || []).map((img) => img.url);
+    const documentTexts = (creativeDump.documents || []).map((d) => d.extractedText);
+
+    const llmResult = await llmService.extractAestheticTags({
+      freeText: creativeDump.freeText || '',
+      imageUrls,
+      documentTexts,
     });
+
+    targetGender = resolveTargetGender(
+      gender || profile?.gender,
+      llmResult.gender
+    );
+    canonicalCategories = canonicalizeStyles(llmResult.categories);
+    aestheticTags = llmResult.aestheticTags;
+    llmSource = llmResult.source;
+
+    const supabase = getSupabase();
+    await supabase
+      .from('project')
+      .update({
+        extracted_categories: canonicalCategories,
+        aesthetic_tags: aestheticTags,
+        status: 'processing',
+      })
+      .eq('id', projectId);
+  } else if (gender || profile?.gender) {
+    targetGender = resolveTargetGender(gender || profile?.gender, null);
+  }
+
+  const profileColors = profile?.bodyAttributes?.recommendedColors || [];
+  const resolvedBaseColor =
+    baseColor || profileColors[0] || null;
+
+  const categoriesToProcess =
+    canonicalCategories.length > 0 ? canonicalCategories : ['casual'];
+
+  const outfitsByCategory = [];
+  let allOutfits = [];
+  let colorApplied = false;
+
+  for (const category of categoriesToProcess) {
+    const { garments: scoredGarments, colorApplied: catColorApplied } =
+      await matchGarmentsWithColor({
+        empresaId: project.empresaId,
+        categories: [category],
+        aestheticTags,
+        baseColor: resolvedBaseColor,
+        gender: targetGender,
+        poolLimit: Math.max(Number(limit) || 8, 50),
+      });
+
+    if (catColorApplied) colorApplied = true;
+
+    let categoryOutfits = assembleOutfits(scoredGarments, 3, category);
+
+    if (categoryOutfits.length === 0) {
+      const { garments: broadPool } = await matchGarmentsWithColor({
+        empresaId: project.empresaId,
+        categories: categoriesToProcess,
+        aestheticTags,
+        baseColor: resolvedBaseColor,
+        gender: targetGender,
+        poolLimit: Math.max(Number(limit) || 8, 80),
+      });
+      categoryOutfits = assembleOutfits(broadPool, 3, category);
+    }
+
+    if (categoryOutfits.length === 0) continue;
+
+    const briefStyles = canonicalizeStyles([category, ...aestheticTags]);
+    const matchPercentage = computeMatchPercentage(
+      categoryOutfits,
+      briefStyles,
+      catColorApplied
+    );
+
+    outfitsByCategory.push({
+      category,
+      matchPercentage,
+      outfits: categoryOutfits,
+    });
+
+    allOutfits = allOutfits.concat(categoryOutfits);
+  }
+
+  if (allOutfits.length === 0) {
+    const { garments: globalPool, colorApplied: globalColorApplied } =
+      await matchGarmentsWithColor({
+        empresaId: project.empresaId,
+        categories: categoriesToProcess,
+        aestheticTags,
+        baseColor: resolvedBaseColor,
+        gender: targetGender,
+        poolLimit: Math.max(Number(limit) || 8, 80),
+      });
+
+    if (globalColorApplied) colorApplied = true;
+
+    const fallbackCategory = categoriesToProcess[0] || 'casual';
+    const fallbackOutfits = assembleOutfits(globalPool, 3, fallbackCategory);
+    const briefStyles = canonicalizeStyles([
+      ...categoriesToProcess,
+      ...aestheticTags,
+    ]);
+    const fallbackMatch = computeMatchPercentage(
+      fallbackOutfits,
+      briefStyles,
+      globalColorApplied
+    );
+
+    if (fallbackOutfits.length > 0) {
+      outfitsByCategory.push({
+        category: fallbackCategory,
+        matchPercentage: fallbackMatch,
+        outfits: fallbackOutfits,
+      });
+      allOutfits = fallbackOutfits;
+    }
+  }
+
+  const recommendedGarments = allOutfits.flatMap((outfit) => outfit.garments);
 
   try {
     await projectService.saveRecommendations(projectId, recommendedGarments);
@@ -257,20 +489,38 @@ const processRequirements = async ({
     console.warn('saveRecommendations skipped (catalog FK):', err.message);
   }
 
+  const supabase = getSupabase();
   await supabase
     .from('project')
     .update({ status: 'ready' })
     .eq('id', projectId);
 
+  const briefStyles = canonicalizeStyles([
+    ...canonicalCategories,
+    ...aestheticTags,
+  ]);
+  const matchPercentage = computeMatchPercentage(
+    allOutfits,
+    briefStyles,
+    colorApplied
+  );
+
   return {
     projectId,
-    extractedCategories: llmResult.categories,
-    aestheticTags: llmResult.aestheticTags,
-    count: recommendedGarments.length,
+    extractedCategories: canonicalCategories,
+    aestheticTags,
+    gender: targetGender,
+    matchPercentage,
+    count: allOutfits.length,
+    outfits: allOutfits,
+    outfitsByCategory,
     recommendedGarments,
+    profileApplied: Boolean(profile?.bodyPhotoUrl),
     pipeline: {
-      llm: llmResult.source,
-      matcher: colorApplied ? 'category-overlap+color-theory' : 'category-overlap',
+      llm: llmSource,
+      matcher: colorApplied
+        ? 'style-canonical+color-theory+gender+outfits+profile'
+        : 'style-canonical+gender+outfits+profile',
       colorTheory: colorApplied ? 'applied' : 'skipped',
     },
   };
@@ -318,6 +568,7 @@ const persistShootPlan = async (projectId, shootPlan) => {
 
 module.exports = {
   saveRequirements,
+  detectCategories,
   processRequirements,
   persistShootPlan,
   matchGarmentsWithColor,

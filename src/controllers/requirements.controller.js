@@ -21,6 +21,7 @@ const submitRequirements = async (req, res) => {
     freeText,
     imageFiles,
     documentFiles,
+    userId: req.user.id,
   });
 
   res.status(201).json({
@@ -31,12 +32,30 @@ const submitRequirements = async (req, res) => {
 
 const processRequirements = async (req, res) => {
   const { projectId } = req.params;
-  const { limit, baseColor } = req.body;
+  const { limit, baseColor, gender } = req.body;
 
   const result = await requirementsService.processRequirements({
     projectId,
     limit: limit ? Number(limit) : 8,
     baseColor,
+    gender,
+    userId: req.user.id,
+    accessToken: req.accessToken,
+  });
+
+  res.status(200).json({
+    success: true,
+    data: result,
+  });
+};
+
+const detectCategories = async (req, res) => {
+  const { projectId } = req.params;
+  const { gender } = req.body;
+
+  const result = await requirementsService.detectCategories({
+    projectId,
+    gender,
   });
 
   res.status(200).json({
@@ -79,6 +98,7 @@ const generateShootPlan = async (req, res) => {
 
 module.exports = {
   submitRequirements,
+  detectCategories,
   processRequirements,
   generateShootPlan,
 };
