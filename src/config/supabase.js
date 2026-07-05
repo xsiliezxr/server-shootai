@@ -61,6 +61,7 @@ const checkSupabaseConnection = async () => {
 
 module.exports = {
   getSupabase,
+  getSupabaseConfig,
   getUserSupabase,
   getDbClient,
   checkSupabaseConnection,

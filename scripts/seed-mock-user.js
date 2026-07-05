@@ -25,6 +25,14 @@ const seedMockUser = async () => {
   console.log('Uploading body photo for mock user…');
   const uploaded = await storageService.uploadImage(file, 'shootai/body-photos');
 
+  if (uploaded.url.startsWith('data:')) {
+    throw new Error(
+      'Refusing to seed mock user with data URL. Configure Cloudinary create permission or Supabase storage bucket.'
+    );
+  }
+
+  console.log(`Stored via ${uploaded.provider}: ${uploaded.url}`);
+
   console.log('Analyzing body photo attributes…');
   const { validation, attributes } = await bodyPhotoService.validateBodyPhoto(
     uploaded.url

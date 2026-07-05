@@ -10,7 +10,8 @@
     "scrape:zara": "node scripts/scrape-zara-batch.js",
     "scrape:zara:full": "node scripts/scrape-zara-full.js",
     "backfill:gender": "node scripts/backfill-gender.js",
-    "test:endpoints": "node scripts/test-endpoints.js"
+    "test:endpoints": "node scripts/test-endpoints.js",
+    "seed:mock-user": "node scripts/seed-mock-user.js"
   },
   "keywords": [],
   "author": "",

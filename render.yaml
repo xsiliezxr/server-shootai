@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: server-shootai
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_CATALOG_URL
+        sync: false
+      - key: SUPABASE_CATALOG_ANON_KEY
+        sync: false
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      - key: CODEX_API_KEY
+        sync: false
+      - key: DEMO_EMPRESA_ID
+        sync: false
