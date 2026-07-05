@@ -4,6 +4,7 @@ const llmService = require('./llm.service');
 const colorService = require('./color.service');
 const AppError = require('../utils/appError');
 const { inferGenderFromListingUrl } = require('../utils/styleTaxonomy');
+const { normalizeGarmentType } = require('../utils/outfitAssembly');
 const {
   assertValidUuid,
   normalizeTags,
@@ -334,7 +335,7 @@ const classifyProduct = async ({ name, brand }) => {
 
       if (ai.source === 'openai') {
         return {
-          type: ai.type || heuristic.type,
+          type: normalizeGarmentType(ai.type || heuristic.type, name),
           categories: normalizeTags([...ai.categories, ...heuristic.categories]),
           aestheticTags: normalizeTags([
             ...ai.aestheticTags,
@@ -348,7 +349,11 @@ const classifyProduct = async ({ name, brand }) => {
     }
   }
 
-  return { ...heuristic, classifier: 'heuristic' };
+  return {
+    ...heuristic,
+    type: normalizeGarmentType(heuristic.type, name),
+    classifier: 'heuristic',
+  };
 };
 
 const scrapeCatalog = async ({ empresaId, brand, url, limit = 20 }) => {

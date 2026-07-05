@@ -2,6 +2,77 @@ const { styleMatchScore } = require('./styleTaxonomy');
 const { colorHarmonyScore } = require('./colorTheory');
 
 const OUTFIT_SLOTS = ['top', 'bottom', 'footwear', 'outerwear', 'accessory', 'dress'];
+const VALID_OUTFIT_SLOTS = new Set(OUTFIT_SLOTS);
+
+const TYPE_KEYWORDS = [
+  { type: 'outerwear', words: ['jacket', 'coat', 'puffer', 'blazer', 'parka', 'trench', 'overcoat', 'vest'] },
+  { type: 'top', words: ['shirt', 'tee', 't-shirt', 'hoodie', 'sweater', 'sweatshirt', 'top', 'polo', 'knit', 'jumper', 'cardigan', 'blouse', 'camisole'] },
+  { type: 'bottom', words: ['pants', 'trousers', 'jeans', 'shorts', 'cargo', 'joggers', 'chino', 'skirt', 'leggings', 'bermuda'] },
+  { type: 'dress', words: ['dress', 'gown', 'jumpsuit', 'romper'] },
+  { type: 'footwear', words: ['shoes', 'sneakers', 'boots', 'loafers', 'sandals', 'trainers', 'heels', 'footwear'] },
+  { type: 'accessory', words: ['bag', 'belt', 'hat', 'cap', 'scarf', 'sunglasses', 'wallet', 'gloves', 'beanie', 'accessory'] },
+];
+
+const TYPE_ALIASES = {
+  shirts: 'top',
+  shirt: 'top',
+  tee: 'top',
+  tshirt: 'top',
+  't-shirt': 'top',
+  pants: 'bottom',
+  trousers: 'bottom',
+  jeans: 'bottom',
+  shorts: 'bottom',
+  skirt: 'bottom',
+  shoes: 'footwear',
+  sneakers: 'footwear',
+  boots: 'footwear',
+  sandals: 'footwear',
+  jacket: 'outerwear',
+  coat: 'outerwear',
+  blazer: 'outerwear',
+  bags: 'accessory',
+  hat: 'accessory',
+  dresses: 'dress',
+};
+
+const inferTypeFromName = (name = '') => {
+  const lower = String(name).toLowerCase();
+  for (const rule of TYPE_KEYWORDS) {
+    if (rule.words.some((word) => lower.includes(word))) {
+      return rule.type;
+    }
+  }
+  return null;
+};
+
+const normalizeGarmentType = (type = '', name = '') => {
+  const raw = String(type || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '');
+
+  if (VALID_OUTFIT_SLOTS.has(raw)) return raw;
+  if (TYPE_ALIASES[raw]) return TYPE_ALIASES[raw];
+
+  const compact = raw.replace(/[^a-z|]/g, '');
+  if (compact.includes('top') && compact.includes('bottom')) {
+    return 'set';
+  }
+
+  const fromName = inferTypeFromName(name);
+  if (fromName) return fromName;
+
+  return VALID_OUTFIT_SLOTS.has(raw.replace(/\|.*$/, ''))
+    ? raw.replace(/\|.*$/, '')
+    : 'top';
+};
+
+const normalizeGarmentForOutfit = (garment = {}) => {
+  const normalizedType = normalizeGarmentType(garment.type, garment.name);
+  if (normalizedType === garment.type) return garment;
+  return { ...garment, type: normalizedType };
+};
 
 const toGarmentSlot = (garment, slot) => ({
   slot,
@@ -18,9 +89,17 @@ const groupGarmentsByType = (garments = []) => {
   const byType = Object.fromEntries(OUTFIT_SLOTS.map((slot) => [slot, []]));
 
   for (const garment of garments) {
-    const type = String(garment.type || '').toLowerCase();
+    const normalized = normalizeGarmentForOutfit(garment);
+    const type = String(normalized.type || '').toLowerCase();
+
+    if (type === 'set') {
+      byType.top.push(normalized);
+      byType.bottom.push(normalized);
+      continue;
+    }
+
     if (byType[type]) {
-      byType[type].push(garment);
+      byType[type].push(normalized);
     }
   }
 
@@ -29,6 +108,46 @@ const groupGarmentsByType = (garments = []) => {
   }
 
   return byType;
+};
+
+const ensureOutfitSlotCoverage = (pool = [], fullPool = []) => {
+  const sourcePool = fullPool.length ? fullPool : pool;
+  if (!pool.length) return pool;
+
+  const byType = groupGarmentsByType(pool);
+  const fullByType = groupGarmentsByType(sourcePool);
+  const usedIds = new Set(pool.map((garment) => garment.garmentId));
+  const result = [...pool];
+
+  const appendFromSlot = (slot, minCount) => {
+    const current = byType[slot]?.length || 0;
+    if (current >= minCount) return;
+
+    let needed = minCount - current;
+    for (const garment of fullByType[slot] || []) {
+      if (usedIds.has(garment.garmentId)) continue;
+      result.push(garment);
+      usedIds.add(garment.garmentId);
+      byType[slot] = byType[slot] || [];
+      byType[slot].push(garment);
+      needed -= 1;
+      if (needed <= 0) break;
+    }
+  };
+
+  appendFromSlot('footwear', 2);
+
+  const hasDress = (byType.dress?.length || 0) > 0;
+  const hasSeparates =
+    (byType.top?.length || 0) > 0 && (byType.bottom?.length || 0) > 0;
+
+  if (!hasDress && !hasSeparates) {
+    appendFromSlot('top', 3);
+    appendFromSlot('bottom', 3);
+    appendFromSlot('dress', 1);
+  }
+
+  return result;
 };
 
 const pickFromSlot = (byType, slot, usedIds, index = 0, allowReuse = false) => {
@@ -51,7 +170,8 @@ const assembleOutfits = (
   idPrefix = 'outfit',
   options = {}
 ) => {
-  const byType = groupGarmentsByType(garments);
+  const preparedGarments = ensureOutfitSlotCoverage(garments, garments);
+  const byType = groupGarmentsByType(preparedGarments);
   const usedIds = new Set();
   const outfits = [];
   const allowReuse = options.allowReuse === true;
@@ -142,4 +262,6 @@ module.exports = {
   assembleOutfits,
   groupGarmentsByType,
   scoreGarmentForBrief,
+  normalizeGarmentType,
+  ensureOutfitSlotCoverage,
 };

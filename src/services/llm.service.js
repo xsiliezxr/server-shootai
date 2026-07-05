@@ -88,11 +88,33 @@ const buildMockResult = (freeText = '', imageCount = 0, documentText = '') => {
   if (combined.toLowerCase().includes('formal')) {
     categories.add('formal');
   }
+  if (combined.toLowerCase().includes('elegant') || combined.toLowerCase().includes('elegante')) {
+    categories.add('elegant');
+  }
+  if (combined.toLowerCase().includes('smart')) {
+    categories.add('smart-casual');
+  }
+  if (combined.toLowerCase().includes('bohemian') || combined.toLowerCase().includes('boho')) {
+    categories.add('bohemian');
+  }
+  if (combined.toLowerCase().includes('vintage') || combined.toLowerCase().includes('retro')) {
+    categories.add('vintage');
+  }
+  if (combined.toLowerCase().includes('y2k')) {
+    categories.add('y2k');
+  }
+  if (combined.toLowerCase().includes('editorial') || combined.toLowerCase().includes('avant')) {
+    categories.add('avant-garde');
+  }
 
-  MOCK_TAG_POOL.slice(0, 3 + Math.min(imageCount, 3)).forEach((tag) => tags.add(tag));
-  MOCK_CATEGORY_POOL.slice(0, 2 + Math.min(imageCount, 2)).forEach((cat) =>
-    categories.add(cat)
-  );
+  if (categories.size === 0) {
+    categories.add(imageCount > 0 ? 'casual' : 'minimalist');
+  }
+
+  keywords.slice(0, 4).forEach((word) => {
+    const [canonical] = canonicalizeStyles([word]);
+    if (canonical) categories.add(canonical);
+  });
 
   const gender = inferGenderFromBrief(combined);
 
@@ -234,16 +256,17 @@ Rules:
 - aestheticTags: finer visual/mood descriptors (not garment types like top/bottom/pants)
 - gender: infer target audience from brief/images as "man", "woman", "unisex", or "kids"
 - Do NOT confuse casual with streetwear unless the brief explicitly asks for streetwear/urban/edgy looks
+- If images are provided, prioritize the visual evidence over ambiguous text.
 - lowercase, no duplicates, max 10 items each
 - infer from images when provided
 - respond in the same language as the brief when tagging mood words`,
     },
   ];
 
-  imageUrls.slice(0, 5).forEach((url) => {
+  imageUrls.slice(0, 8).forEach((url) => {
     userContent.push({
       type: 'image_url',
-      image_url: { url, detail: 'low' },
+      image_url: { url, detail: 'high' },
     });
   });
 
@@ -259,9 +282,16 @@ Rules:
     temperature: 0.2,
   });
 
+  const categories = canonicalizeStyles(parsed.categories);
+  const aestheticTags = normalizeList(parsed.aestheticTags || parsed.tags);
+
+  if (imageUrls.length > 0 && categories.length === 0 && aestheticTags.length === 0) {
+    throw new Error('LLM did not return visual categories for the provided images');
+  }
+
   return {
-    categories: canonicalizeStyles(parsed.categories),
-    aestheticTags: normalizeList(parsed.aestheticTags || parsed.tags),
+    categories,
+    aestheticTags,
     gender: normalizeGender(parsed.gender || inferGenderFromBrief(freeText)),
     source,
     raw: parsed,
@@ -322,13 +352,25 @@ const extractAestheticTags = async ({
   documentTexts = [],
 }) => {
   const { apiKey } = getLlmConfig();
+  const hasVisualInput = Array.isArray(imageUrls) && imageUrls.length > 0;
 
   if (apiKey) {
     try {
       return await extractWithLlm({ freeText, imageUrls, documentTexts });
     } catch (error) {
+      if (hasVisualInput) {
+        throw new Error(
+          `Image category analysis failed: ${error.message || 'unknown LLM error'}`
+        );
+      }
       console.warn('LLM extraction failed, falling back to mock:', error.message);
     }
+  }
+
+  if (hasVisualInput) {
+    throw new Error(
+      'Image category analysis requires CODEX_API_KEY or OPENAI_API_KEY on the backend'
+    );
   }
 
   const mock = buildMockResult(

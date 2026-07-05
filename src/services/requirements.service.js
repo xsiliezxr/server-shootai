@@ -15,6 +15,8 @@ const {
 const {
   assembleOutfits,
   scoreGarmentForBrief,
+  ensureOutfitSlotCoverage,
+  normalizeGarmentType,
 } = require('../utils/outfitAssembly');
 const { assertValidUuid, handleSupabaseError } = require('../utils/supabaseHelpers');
 const profileService = require('./profile.service');
@@ -175,7 +177,7 @@ const mapScoredGarment = ({
   garmentId: garment.id,
   name: garment.name,
   brand: garment.brand,
-  type: garment.type,
+  type: normalizeGarmentType(garment.type, garment.name),
   gender: garment.gender || 'unisex',
   color: garment.color,
   silhouette: garment.silhouette,
@@ -192,7 +194,19 @@ const mapScoredGarment = ({
 
 const scoreCatalogGarments = ({ catalog, briefStyles, baseHsl, gender }) =>
   catalog
-    .filter((garment) => matchesGenderStrict(garment.gender, gender, garment.type))
+    .filter((garment) =>
+      matchesGenderStrict(
+        garment.gender,
+        gender,
+        garment.type,
+        garment.name,
+        [
+          ...(garment.categories || []),
+          ...(garment.aesthetic_tags || garment.aestheticTags || garment.tags || []),
+          garment.product_url || garment.productUrl || '',
+        ]
+      )
+    )
     .map((garment) => scoreGarmentForBrief({ garment, briefStyles, baseHsl }))
     .sort((a, b) => b.combinedScore - a.combinedScore);
 
@@ -241,26 +255,17 @@ const matchGarmentsWithColor = async ({
       baseHsl ? combinedScore >= minScore : styleScore >= minScore
     );
 
-  let scored = pickPool(
-    scoreCatalogGarments({
-      catalog,
-      briefStyles,
-      baseHsl,
-      gender,
-    }),
-    0.5
-  );
+  const allScored = scoreCatalogGarments({
+    catalog,
+    briefStyles,
+    baseHsl,
+    gender,
+  });
+
+  let scored = pickPool(allScored, 0.5);
 
   if (scored.length < 12) {
-    scored = pickPool(
-      scoreCatalogGarments({
-        catalog,
-        briefStyles,
-        baseHsl,
-        gender,
-      }),
-      0
-    );
+    scored = pickPool(allScored, 0);
   }
 
   scored = scored.slice(0, limit);
@@ -276,8 +281,11 @@ const matchGarmentsWithColor = async ({
     return { garments: fallback, colorApplied: false };
   }
 
+  const mappedPool = mapScoredPool(scored);
+  const mappedFullPool = mapScoredPool(allScored);
+
   return {
-    garments: mapScoredPool(scored),
+    garments: ensureOutfitSlotCoverage(mappedPool, mappedFullPool),
     colorApplied: Boolean(baseHsl),
   };
 };
@@ -523,6 +531,45 @@ const processRequirements = async ({
         outfits: fallbackOutfits,
       });
       allOutfits = fallbackOutfits;
+    }
+  }
+
+  if (allOutfits.length === 0 && targetGender !== 'unisex') {
+    for (const category of categoriesToProcess) {
+      const { garments: relaxedPool, colorApplied: relaxedColorApplied } =
+        await matchGarmentsWithColor({
+          empresaId: project.empresaId,
+          categories: [category],
+          aestheticTags,
+          baseColor: resolvedBaseColor,
+          gender: 'unisex',
+          poolLimit: Math.max(Number(limit) || 8, 80),
+        });
+
+      if (relaxedColorApplied) colorApplied = true;
+
+      const relaxedOutfits = assembleOutfits(
+        relaxedPool,
+        Math.max(3, minOutfitsPerCategory),
+        category,
+        { allowReuse: true }
+      );
+
+      if (relaxedOutfits.length === 0) continue;
+
+      const briefStyles = canonicalizeStyles([category, ...aestheticTags]);
+      const relaxedMatch = computeMatchPercentage(
+        relaxedOutfits,
+        briefStyles,
+        relaxedColorApplied
+      );
+
+      outfitsByCategory.push({
+        category,
+        matchPercentage: relaxedMatch,
+        outfits: relaxedOutfits,
+      });
+      allOutfits = allOutfits.concat(relaxedOutfits);
     }
   }
 

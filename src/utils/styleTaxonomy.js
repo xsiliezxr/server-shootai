@@ -378,13 +378,28 @@ const matchesGenderFilter = (garmentGender, targetGender) => {
   return true;
 };
 
-const matchesGenderStrict = (garmentGender, targetGender) => {
+const matchesGenderStrict = (
+  garmentGender,
+  targetGender,
+  garmentType = '',
+  garmentName = '',
+  garmentTags = []
+) => {
   const garment = normalizeGender(garmentGender);
   const target = normalizeGender(targetGender);
 
   if (target === 'unisex') return true;
+  if (target === 'kids') return garment === 'kids';
+  if (garment === 'kids') return false;
 
-  return garment === target;
+  if (garment === target) return true;
+  if (garment !== 'unisex') return false;
+
+  const inferred = inferGenderFromText(garmentName, garmentType, garmentTags);
+  if (inferred === target) return true;
+  if (inferred === 'unisex') return true;
+
+  return false;
 };
 
 const inferGenderFromBrief = (freeText = '') => {

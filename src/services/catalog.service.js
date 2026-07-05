@@ -17,6 +17,7 @@ const {
   canonicalizeStyles,
   matchesGenderStrict,
 } = require('../utils/styleTaxonomy');
+const { normalizeGarmentType } = require('../utils/outfitAssembly');
 
 const normalizeGarment = (g, empresaId) => {
   if (!g || !g.name || !g.type) {
@@ -35,7 +36,7 @@ const normalizeGarment = (g, empresaId) => {
     empresa_id: empresaId || g.empresaId,
     name: g.name,
     brand: g.brand || '',
-    type: g.type,
+    type: normalizeGarmentType(g.type, g.name),
     gender:
       g.gender ||
       inferGenderFromText(g.name, g.type, [
@@ -142,7 +143,7 @@ const mapScoredGarment = ({ garment, score, matchedStyles }) => ({
   garmentId: garment.id,
   name: garment.name,
   brand: garment.brand,
-  type: garment.type,
+  type: normalizeGarmentType(garment.type, garment.name),
   gender: garment.gender || 'unisex',
   color: garment.color,
   silhouette: garment.silhouette,
@@ -153,6 +154,12 @@ const mapScoredGarment = ({ garment, score, matchedStyles }) => ({
   matchedTags: matchedStyles,
   selected: false,
 });
+
+const garmentGenderTags = (garment) => [
+  ...(garment.categories || []),
+  ...(garment.aesthetic_tags || garment.aestheticTags || garment.tags || []),
+  garment.product_url || garment.productUrl || '',
+];
 
 const recommendForProject = async ({ projectId, limit = 8, gender }) => {
   const project = await projectService.findProjectById(projectId);
@@ -179,7 +186,9 @@ const recommendForProject = async ({ projectId, limit = 8, gender }) => {
   }
 
   const scored = catalog
-    .filter((g) => matchesGenderStrict(g.gender, gender, g.type))
+    .filter((g) =>
+      matchesGenderStrict(g.gender, gender, g.type, g.name, garmentGenderTags(g))
+    )
     .map((g) => {
       const { score, matchedStyles } = scoreGarmentsByStyle(g, briefStyles);
       return { garment: g, score, matchedStyles };
@@ -242,7 +251,9 @@ const matchGarmentsForEmpresa = async ({
   }
 
   const scored = catalog
-    .filter((g) => matchesGenderStrict(g.gender, gender, g.type))
+    .filter((g) =>
+      matchesGenderStrict(g.gender, gender, g.type, g.name, garmentGenderTags(g))
+    )
     .map((g) => {
       const { score, matchedStyles } = scoreGarmentsByStyle(g, briefStyles);
       return { garment: g, score, matchedStyles };
@@ -254,7 +265,9 @@ const matchGarmentsForEmpresa = async ({
 
   if (top.length === 0) {
     top = catalog
-      .filter((g) => matchesGenderStrict(g.gender, gender, g.type))
+      .filter((g) =>
+        matchesGenderStrict(g.gender, gender, g.type, g.name, garmentGenderTags(g))
+      )
       .map((g) => {
         const { score, matchedStyles } = scoreGarmentsByStyle(g, briefStyles);
         return { garment: g, score, matchedStyles };
