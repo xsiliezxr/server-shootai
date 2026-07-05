@@ -5,6 +5,7 @@ const empresaRoutes = require('./empresa.routes');
 const clienteRoutes = require('./cliente.routes');
 const catalogRoutes = require('./catalog.routes');
 const creativeDumpRoutes = require('./creativeDump.routes');
+const fashionRoutes = require('./fashion.routes');
 
 const router = Router();
 
@@ -14,5 +15,6 @@ router.use('/clientes', clienteRoutes);
 router.use('/projects', projectRoutes);
 router.use('/catalog', catalogRoutes);
 router.use('/creative-dump', creativeDumpRoutes);
+router.use('/fashion-matcher', fashionRoutes);
 
 module.exports = router;
